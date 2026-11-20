@@ -1,6 +1,6 @@
 from sqlalchemy import Column,Integer,String,Float,Boolean,ForeignKey,JSON,UniqueConstraint,CheckConstraint
 from .db import Base
-from .constants import SAMPLE_STATES,LOT_STATES
+from .constants import SAMPLE_STATES,LOT_STATES,EXPERIMENT_STATES
 class User(Base):
     __tablename__='users'
     id=Column(Integer,primary_key=True);email=Column(String(100),unique=True,nullable=False);password_hash=Column(String(220),nullable=False);role=Column(String(30),nullable=False)
@@ -37,3 +37,14 @@ class Settlement(Base):
     __tablename__='settlements'
     id=Column(Integer,primary_key=True);deal_id=Column(Integer,ForeignKey('deals.id'),nullable=False);revision=Column(Integer,nullable=False);kind=Column(String(20),nullable=False);gross_cents=Column(Integer,nullable=False);commission_cents=Column(Integer,nullable=False);target_cents=Column(Integer,nullable=False);delta_cents=Column(Integer,nullable=False);state=Column(String(20),default='draft');snapshot=Column(JSON);receipt=Column(String(80))
     __table_args__=(UniqueConstraint('deal_id','revision'),)
+class Experiment(Base):
+    __tablename__='experiments'
+    id=Column(Integer,primary_key=True);code=Column(String(60),unique=True,nullable=False);consignment_id=Column(Integer,ForeignKey('consignments.id'),nullable=False);primary_pairs=Column(Integer,nullable=False);state=Column(String(20),default=EXPERIMENT_STATES[0]);conclusion_days=Column(Float);conclusion=Column(JSON);created_at=Column(String(20),nullable=False);finalized_at=Column(String(20))
+    __table_args__=(CheckConstraint('primary_pairs>0'),)
+class ExperimentPair(Base):
+    __tablename__='experiment_pairs'
+    id=Column(Integer,primary_key=True);experiment_id=Column(Integer,ForeignKey('experiments.id'),nullable=False);seq=Column(Integer,nullable=False);role=Column(String(10),nullable=False);status=Column(String(10),nullable=False)
+    __table_args__=(UniqueConstraint('experiment_id','seq'),)
+class ExperimentSlot(Base):
+    __tablename__='experiment_slots'
+    id=Column(Integer,primary_key=True);pair_id=Column(Integer,ForeignKey('experiment_pairs.id'),nullable=False);sample_id=Column(Integer,ForeignKey('vase_samples.id'),unique=True,nullable=False);arm=Column(String(10),nullable=False);locked_estimate=Column(Float,nullable=False);actual_days=Column(Float);damaged_at=Column(String(20))

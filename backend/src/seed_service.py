@@ -22,4 +22,9 @@ def seed():
         deal=s.scalar(select(Deal).where(Deal.lot_id==lot.id))
         if not deal:deal=Deal(lot_id=lot.id,bid_id=bid.id,buyer=bid.buyer,crates=2,unit_cents=10000,original_grade='A',effective_grade='A',revision=1,at='2026-11-18T07:50:00');s.add(deal);s.flush()
         if not s.scalar(select(Dispute.id).where(Dispute.deal_id==deal.id)):s.add(Dispute(deal_id=deal.id,reason='历史留样仅6天，买方请求按留样复判',state='opened',sample_snapshot={c.name:getattr(sample,c.name)for c in sample.__table__.columns}))
+        estimates=[('FLS32',.42,68,3,6.2),('FLS33',.4,70,3,6.5),('FLS34',.33,74,4,7.1),('FLS35',.3,72,5,7.4),('FLS36',.26,78,4,8.0),('FLS37',.24,80,6,8.3)]
+        for code,mat,stem,cold,days in estimates:
+            if not s.scalar(select(VaseSample.id).where(VaseSample.code==code)):
+                g='A'if days>=10 else'B'if days>=7 else'C'
+                s.add(VaseSample(consignment_id=c.id,code=code,maturity=mat,stem_cm=stem,cold_hours=cold,state='approved',approved_grade=g,review_note='演示预置估级，供保鲜液对比试验配组',prediction={'model':'GradientBoostingRegressor','seed':35,'train_rows':150,'holdout_rows':50,'vase_days':days,'suggested_grade':g,'holdout_mae_days':.62,'input_snapshot':{'maturity':mat,'stem_cm':stem,'postcut_hours':3.0,'cold_hours':cold}}))
         s.commit();return {m.__tablename__:s.scalar(select(func.count()).select_from(m))for m in (User,Consignment,VaseSample,AuctionSession,AuctionLot,Bid,Deal,Dispute,Settlement)}

@@ -17,13 +17,13 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 |角色|邮箱 / 统一口令 Flowers2026!|允许动作|
 |---|---|---|
-|operator 验级员|operator@chenlu.demo|登记到场/留样、估级、封存瓶插终点、占筐挂场、记录买方报价、申请争议|
-|supervisor 拍卖主管|supervisor@chenlu.demo|全部日常动作；筐贴备注核对、核级、场次/时钟、截标/撤场、留样复判、生成结算与登记补退回单|
+|operator 验级员|operator@chenlu.demo|登记到场/留样、估级、封存瓶插终点、占筐挂场、记录买方报价、申请争议、开测保鲜试验、登记破损与实测|
+|supervisor 拍卖主管|supervisor@chenlu.demo|全部日常动作；筐贴备注核对、核级、场次/时钟、截标/撤场、留样复判、生成结算与登记补退回单、试验定稿|
 |viewer 观察席|viewer@chenlu.demo|六页、档案与审计读取；全部写接口后端403|
 
 JWT8小时，PBKDF2盐化口令；Trace中间件请求ID、Burst每IP每分钟360请求、审计actor/action。演示部署需更换默认JWT和库口令。
 
-## 六个业务模块
+## 七个业务模块
 
 1. **采切批次与到场分筐**：Consignment唯一code，种植户/品种/采切与到场时间/筐数/每筐支数。到场必须在采切后48小时内且不晚于业务时钟。数量建立后不可任意改写，主管只能修筐贴备注。挂场和成交合计占筐不得超实收。
 2. **瓶插留样与寿命估级**：VaseSample关联到场单，唯一留样签，成熟度、杆长、冷藏小时不得超过采后小时。recorded→queued→running→ready或failed，worker真实估级后主管核定A/B/C，保留模型建议与人工核级。实际瓶插终点只能封存一次；争议使用冻结快照，不覆盖旧证据。
@@ -31,6 +31,7 @@ JWT8小时，PBKDF2盐化口令；Trace中间件请求ID、Burst每IP每分钟36
 4. **竞价与成交锁筐**：Bid须在`opens_at ≤ clock < closes_at`时提交，达到底价并严格高于当前最高价。同父行→场次→业务时钟→标的锁序，避免并发报价检查窗口。主管只能在截止后一次截标，最高价Bid生成唯一Deal；无报价不成交，需撤场。成交冻结买方、单价、筐数与原等级，不能再次出售。
 5. **留样争议和复判**：Deal必须已有实际留样天数才可开Dispute，每成交只允许一条未决争议。主管复判不得上调现有效等级，也不得高于冻结终点对应级别（≥10天A、≥7天B、否则C）。复判只追加修订，推进Deal.revision，旧draft结算作废；已付记录保留。
 6. **货款结算及差额补退**：A/B/C权重100/90/75，`折后货款=floor(成交筐价×筐数×新等级权重÷原等级权重)`，佣金floor(货款×5%)，目标净款=货款−佣金。本次delta=当前目标−所有已付delta合计；负数为种植户退款。每成交每revision唯一Settlement，争议未决禁止生成/支付，过期/已付/作废拒绝再支付，回单号持久化。金额用整数分。
+7. **保鲜液对比试验**：选同批已估级（有worker预测）且未封存实测的留样，按预计寿命就近配成正选对与候补对，每对抽签决定哪枝用新液、另一枝用清水；开测即锁定两组的配对、签与估值，每枝留样终身只进一场试验。开测先锁Consignment父行使同批开测串行，两场并发抢同一枝时落空的整场退回。正选破损整对作废，按原顺序启用下一候补对，破损登记幂等、重试不重复递补；候补对破损则作废跳过。候补启用前不收实测，作废对晚报的实测照存但不入结论。正选补齐且实测全到才由主管定稿，结论=每对`（新液实测−清水实测）−（新液估值−清水估值）`的平均；候补用尽导致正选不齐则永远不能定稿。破损与定稿同取试验行锁，先办成的为准。留样页面可开测、登记破损与实测、查配对/候补与结论。
 
 业务时钟Clock初始2026-11-18 08:00，由主管在“等级挂场”向前推进；场次/截止判定统一用该时钟，无需等待现实时间。界面datetime按本地业务时间解释，不支持时区换算。seed和重启不回拨时钟。
 
@@ -50,10 +51,11 @@ JWT8小时，PBKDF2盐化口令；Trace中间件请求ID、Burst每IP每分钟36
 6. 09:20 买方申请争议，无实际留样终点先被拒。回瓶插页封存6天，再开争议；主管据冻结留样复判C，Deal推进R2。
 7. 09:40 R2目标30000货款−1500佣金=28500分；此前已付38000，补退delta为−9500分，登记`REFUND-9500`退款回单。R1保持原值。
 8. 10:00 观察席复看成交、留样快照与两次回单；没有外发支付或交易指令，付款/退款是本地业务登记。
+9. 10:10 回瓶插留样页开测`EXP-NEW`：同批预置6枝已估级留样（FLS32–37），配正选2对、候补1对，抽签锁定新液/清水。登记正选一枝破损，整对作废并自动启用候补第3对；给各对登记实测后主管定稿，页面给出“每对多撑天数”结论。
 
 ## 结构与开发
 
-后端关系实体`models.py`、输入约束`schemas.py`、`auction_service.py`父锁/额度/竞价/成交、`dispute_service.py`证据/修订/金额账、`grading.py`模型、`worker.py`队列、`main.py`逐路由权限。前端六独立pages分别处理arrival/samples/offers/bidding/disputes/settlement，`components/tickets.js`留样等级签/到场签/拍价带等跨页复用；`utils/format.js`类型转义、`utils/actions.js`请求错误恢复、store关联档案。前后端constants均有角色、等级、留样状态、标的状态，后端schema/业务规则执行校验，前端展示实际持久状态。
+后端关系实体`models.py`、输入约束`schemas.py`、`auction_service.py`父锁/额度/竞价/成交、`dispute_service.py`证据/修订/金额账、`experiment_service.py`配对/抽签/破损递补/定稿结论、`grading.py`模型、`worker.py`队列、`main.py`逐路由权限。前端六独立pages分别处理arrival/samples/offers/bidding/disputes/settlement，保鲜液试验板块挂在samples页；`components/tickets.js`留样等级签/到场签/拍价带等跨页复用；`utils/format.js`类型转义、`utils/actions.js`请求错误恢复、store关联档案。前后端constants均有角色、等级、留样状态、标的状态与试验/对状态，后端schema/业务规则执行校验，前端展示实际持久状态。
 
 本地后端安装requirements，配置DATABASE_URL/REDIS_URL/JWT_SECRET，运行`uvicorn src.main:app --reload`与`python -m src.worker`；前端可由Compose Nginx反代/api。seed自然键只补缺：不覆盖人工筐贴、时钟、观察、竞价、争议判定和已付回单。测试与截图在`../../test-artifacts/gb-1035/`。
 

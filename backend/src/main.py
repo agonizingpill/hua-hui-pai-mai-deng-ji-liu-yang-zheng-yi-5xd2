@@ -11,7 +11,7 @@ from .schemas import *
 from .common import lock,pack,add,audit,stamp
 from .auth import current,writer,supervisor,verify,token
 from .middleware import Trace,Burst
-from . import auction_service as auction,dispute_service as dispute
+from . import auction_service as auction,dispute_service as dispute,experiment_service as experiment
 q=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
 @asynccontextmanager
 async def lifespan(app):
@@ -35,7 +35,7 @@ def login(d:Login,s=Depends(session)):
 def me(u=Depends(current)):return {'email':u.email,'role':u.role}
 @app.get('/archive')
 def archive(s=Depends(session),u=Depends(current)):
-    return {m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Clock,Consignment,VaseSample,AuctionSession,AuctionLot,Bid,Deal,Dispute,Settlement)}
+    return {m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Clock,Consignment,VaseSample,AuctionSession,AuctionLot,Bid,Deal,Dispute,Settlement,Experiment,ExperimentPair,ExperimentSlot)}
 @app.get('/audits')
 def audits(s=Depends(session),u=Depends(current)):return [pack(x)for x in s.scalars(select(Audit).order_by(Audit.id.desc()).limit(50))]
 @app.post('/consignments')
@@ -102,3 +102,15 @@ def settlement(id:int,s=Depends(session),u=Depends(supervisor)):
 @app.post('/settlements/{id}/pay')
 def pay(id:int,d:ReceiptInput,s=Depends(session),u=Depends(supervisor)):
     x=dispute.pay(s,id,d,u);s.commit();return x
+@app.post('/experiments')
+def experiment_new(d:ExperimentInput,s=Depends(session),u=Depends(writer)):
+    x=experiment.create(s,d,u);s.commit();return x
+@app.post('/experiments/{id}/damage')
+def experiment_damage(id:int,d:DamageInput,s=Depends(session),u=Depends(writer)):
+    x=experiment.damage(s,id,d,u);s.commit();return x
+@app.post('/experiments/{id}/measure')
+def experiment_measure(id:int,d:MeasureInput,s=Depends(session),u=Depends(writer)):
+    x=experiment.measure(s,id,d,u);s.commit();return x
+@app.post('/experiments/{id}/finalize')
+def experiment_finalize(id:int,s=Depends(session),u=Depends(supervisor)):
+    x=experiment.finalize(s,id,u);s.commit();return x
