@@ -43,7 +43,7 @@ class Experiment(Base):
     __table_args__=(CheckConstraint('primary_pairs>0'),)
 class ExperimentPair(Base):
     __tablename__='experiment_pairs'
-    id=Column(Integer,primary_key=True);experiment_id=Column(Integer,ForeignKey('experiments.id'),nullable=False);seq=Column(Integer,nullable=False);role=Column(String(10),nullable=False);status=Column(String(10),nullable=False)
+    id=Column(Integer,primary_key=True);experiment_id=Column(Integer,ForeignKey('experiments.id'),nullable=False);seq=Column(Integer,nullable=False);role=Column(String(10),nullable=False);status=Column(String(10),nullable=False);activated_at=Column(String(20))
     __table_args__=(UniqueConstraint('experiment_id','seq'),)
 class ExperimentSlot(Base):
     __tablename__='experiment_slots'

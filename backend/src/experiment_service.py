@@ -15,7 +15,7 @@ def create(s,d,u):
     exp=add(s,Experiment(code=d.code,consignment_id=cons.id,primary_pairs=d.primary_pairs,created_at=clock.now))
     for i in range(d.primary_pairs+d.backup_pairs):
         a,b=pool[2*i],pool[2*i+1]
-        pair=ExperimentPair(experiment_id=exp['id'],seq=i+1,role='primary' if i<d.primary_pairs else 'backup',status='active' if i<d.primary_pairs else 'standby');s.add(pair);s.flush()
+        pair=ExperimentPair(experiment_id=exp['id'],seq=i+1,role='primary' if i<d.primary_pairs else 'backup',status='active' if i<d.primary_pairs else 'standby',activated_at=clock.now if i<d.primary_pairs else None);s.add(pair);s.flush()
         if secrets.randbelow(2):a,b=b,a
         s.add(ExperimentSlot(pair_id=pair.id,sample_id=a.id,arm='treatment',locked_estimate=a.prediction['vase_days']))
         s.add(ExperimentSlot(pair_id=pair.id,sample_id=b.id,arm='control',locked_estimate=b.prediction['vase_days']))
@@ -33,7 +33,7 @@ def damage(s,id,d,u):
     if pair.status=='active':
         pair.status='void';note+='，第'+str(pair.seq)+'对整对作废'
         nxt=s.scalar(select(ExperimentPair).where(ExperimentPair.experiment_id==exp.id,ExperimentPair.status=='standby').order_by(ExperimentPair.seq).limit(1))
-        if nxt:nxt.status='active';note+='，按原顺序启用候补第'+str(nxt.seq)+'对'
+        if nxt:nxt.status='active';nxt.activated_at=clock.now;note+='，按原顺序启用候补第'+str(nxt.seq)+'对'
         else:note+='，候补已用尽'
     elif pair.status=='standby':pair.status='void';note+='，候补第'+str(pair.seq)+'对作废跳过'
     else:note+='，所在对已作废，仅留记录'
@@ -43,7 +43,8 @@ def measure(s,id,d,u):
     slot=slot_of(s,exp.id,d.sample_id)
     if not slot:raise HTTPException(404,'该留样不在本场试验中')
     pair=s.get(ExperimentPair,slot.pair_id)
-    if pair.status=='standby':raise HTTPException(409,'候补对启用前不登记实测')
+    if pair.status=='standby' or (pair.status=='void' and pair.role=='backup' and pair.activated_at is None):
+        raise HTTPException(409,'候补对启用前不登记实测')
     if slot.actual_days is not None:
         if slot.actual_days==d.actual_days:return pack(exp)
         raise HTTPException(409,'该枝实测已登记，不能覆盖')
